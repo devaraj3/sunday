@@ -27,8 +27,7 @@ export default function App() {
     if (!containerRef.current) return
     viewerRef.current = createViewer(containerRef.current)
 
-    // Create worker once
-    workerRef.current = new Worker(new URL('../workers/occ-worker.ts', import.meta.url), { type: 'module' })
+   workerRef.current = new Worker(new URL('../workers/occ-worker.ts', import.meta.url))
 
     return () => {
       viewerRef.current?.dispose()
