@@ -14,13 +14,19 @@ let occt: any | null = null
 
 async function init() {
   if (occt) return occt
-  // Loads the JS you uploaded at /public/occ/…
+  // Load the JS glue from /public/occ/
   ctx.importScripts('/occ/occt-import-js.js')
+
   const factory = (ctx as any).occtimportjs
   if (!factory) throw new Error('occtimportjs not found. Is /occ/occt-import-js.js uploaded?')
-  occt = await factory()
+
+  // ⬇️ The key line: force the wasm path to /occ/
+  occt = await factory({
+    locateFile: (f: string) => `/occ/${f}`   // returns /occ/occt-import-js.wasm
+  })
   return occt
 }
+
 
 ctx.onmessage = async (e: MessageEvent<TessReq>) => {
   const { id, type, payload } = e.data
