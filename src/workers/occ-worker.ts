@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-export {}
+
 
 type TessReq = {
   id: string
