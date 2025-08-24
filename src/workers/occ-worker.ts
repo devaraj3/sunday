@@ -4,7 +4,7 @@
 type TessReq = {
   id: string
   type: 'tessellate'
-  payload: { buffer: ArrayBuffer; ext: 'step'|'stp'|'iges'|'igs'; linearDeflection?: number; angularDeflection?: number }
+  payload: { buffer: ArrayBuffer; ext: 'step'|'stp'|'iges'|'igs'|'brep'; linearDeflection?: number; angularDeflection?: number }
 }
 type TessOk  = { id: string; ok: true; positions: Float32Array; indices: Uint32Array }
 type TessErr = { id: string; ok: false; error: string }
@@ -46,6 +46,7 @@ ctx.onmessage = async (e: MessageEvent<TessReq>) => {
     let res: any
     if (ext === 'step' || ext === 'stp')   res = mod.ReadStepFile(u8, params)
     else if (ext === 'iges' || ext === 'igs') res = mod.ReadIgesFile(u8, params)
+    else if (ext === 'brep')                  res = mod.ReadBrepFile(u8, params)
     else throw new Error('Unsupported extension')
 
     if (!res || !res.success) throw new Error('Import failed')
