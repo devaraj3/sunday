@@ -1,30 +1,65 @@
-// Placeholder worker using OpenCascade.js. In a real application the OpenCascade
-// WASM module would be loaded here to parse STEP/IGES and compute tessellations
-// and hidden line removal drawings.
+/// <reference lib="webworker" />
+export {}
 
-interface TessellateRequest {
-  id: number;
-  type: 'tessellate';
-  ext: string;
-  buffer: ArrayBuffer;
+type TessReq = {
+  id: string
+  type: 'tessellate'
+  payload: { buffer: ArrayBuffer; ext: 'step'|'stp'|'iges'|'igs'; linearDeflection?: number; angularDeflection?: number }
+}
+type TessOk  = { id: string; ok: true; positions: Float32Array; indices: Uint32Array }
+type TessErr = { id: string; ok: false; error: string }
+
+const ctx: DedicatedWorkerGlobalScope = self as any
+let occt: any | null = null
+
+async function init() {
+  if (occt) return occt
+  // Loads the JS you uploaded at /public/occ/…
+  ctx.importScripts('/occ/occt-import-js.js')
+  const factory = (ctx as any).occtimportjs
+  if (!factory) throw new Error('occtimportjs not found. Is /occ/occt-import-js.js uploaded?')
+  occt = await factory()
+  return occt
 }
 
-interface DrawingRequest {
-  id: number;
-  type: 'drawing';
-}
+ctx.onmessage = async (e: MessageEvent<TessReq>) => {
+  const { id, type, payload } = e.data
+  if (type !== 'tessellate') return
+  try {
+    const { buffer, ext, linearDeflection = 0.5, angularDeflection = 0.3 } = payload
+    const u8 = new Uint8Array(buffer)
+    const mod = await init()
 
-self.onmessage = async (e: MessageEvent<TessellateRequest | DrawingRequest>) => {
-  const msg = e.data;
-  if (msg.type === 'tessellate') {
-    // OpenCascade integration would go here. For now return an empty geometry.
-    const positions = new Float32Array();
-    const normals = new Float32Array();
-    const indices = new Uint32Array();
-    (self as any).postMessage({ id: msg.id, positions, normals, indices });
-  } else if (msg.type === 'drawing') {
-    // Placeholder SVG output
-    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='210mm' height='297mm'></svg>`;
-    (self as any).postMessage({ id: msg.id, svg });
+    const params = {
+      linearUnit: 'millimeter',
+      linearDeflectionType: 'absolute_value',
+      linearDeflection,
+      angularDeflection
+    }
+
+    let res: any
+    if (ext === 'step' || ext === 'stp')   res = mod.ReadStepFile(u8, params)
+    else if (ext === 'iges' || ext === 'igs') res = mod.ReadIgesFile(u8, params)
+    else throw new Error('Unsupported extension')
+
+    if (!res || !res.success) throw new Error('Import failed')
+
+    // Flatten meshes
+    const positions: number[] = []
+    const indices: number[] = []
+    let offset = 0
+    for (const m of res.meshes as any[]) {
+      const p = m.attributes.position.array as number[]
+      const i = m.index.array as number[]
+      positions.push(...p)
+      for (let k = 0; k < i.length; k++) indices.push(i[k] + offset)
+      offset += p.length / 3
+    }
+
+    const pos = new Float32Array(positions)
+    const idx = new Uint32Array(indices)
+    ctx.postMessage({ id, ok: true, positions: pos, indices: idx } as TessOk, [pos.buffer, idx.buffer])
+  } catch (err: any) {
+    ctx.postMessage({ id, ok: false, error: err?.message || String(err) } as TessErr)
   }
-};
+}
