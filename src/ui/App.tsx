@@ -1,72 +1,47 @@
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { Viewer } from '../render/viewer';
-import { loadMesh } from '../loaders/meshLoader';
-import { Unit, convert, format } from '../core/units';
+import React, { useEffect, useRef } from 'react'
+import * as THREE from 'three'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { createViewer } from '../render/viewer'
 
-export const App: React.FC = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const viewerRef = useRef<Viewer>();
-  const workerRef = useRef<Worker>();
-  const [unit, setUnit] = useState<Unit>('mm');
-  const [size, setSize] = useState<THREE.Vector3>();
+export default function App() {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const viewerRef = useRef<ReturnType<typeof createViewer> | null>(null)
 
   useEffect(() => {
-    if (canvasRef.current) {
-      viewerRef.current = new Viewer(canvasRef.current);
-      workerRef.current = new Worker(new URL('../workers/occ-worker.ts', import.meta.url), { type: 'module' });
-      const loop = () => {
-        viewerRef.current?.render();
-        requestAnimationFrame(loop);
-      };
-      loop();
-    }
-    return () => workerRef.current?.terminate();
-  }, []);
+    if (!containerRef.current) return
+    viewerRef.current = createViewer(containerRef.current)
+    return () => viewerRef.current?.dispose()
+  }, [])
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !viewerRef.current || !workerRef.current) return;
-    try {
-      const obj = await loadMesh(file, workerRef.current);
-      viewerRef.current.scene.add(obj);
-      viewerRef.current.fitToView(obj);
-      const box = new THREE.Box3().setFromObject(obj);
-      const s = box.getSize(new THREE.Vector3());
-      setSize(s);
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !viewerRef.current) return
 
-  const displaySize = () => {
-    if (!size) return '';
-    const l = format(convert(size.x, 'm', unit), unit);
-    const w = format(convert(size.y, 'm', unit), unit);
-    const h = format(convert(size.z, 'm', unit), unit);
-    return `L ${l} × W ${w} × H ${h}`;
-    };
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext === 'stl') {
+      const buf = await file.arrayBuffer()
+      const loader = new STLLoader()
+      const geom = loader.parse(buf as ArrayBuffer)
+
+      // OPTIONAL: if your STL units are millimeters and look huge/small, you can scale here.
+      // geom.scale(0.1, 0.1, 0.1)
+
+      viewerRef.current.loadMeshFromGeometry(geom)
+    } else {
+      alert('For now, please try an STL file. STEP/IGES need tessellation which is not implemented yet.')
+    }
+  }
 
   return (
-    <div style={{ width: '100vw', height: '100vh' }}>
-      <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
-      <input type="file" onChange={handleFile} style={{ position: 'absolute', top: 10, left: 10 }} />
-      <div style={{ position: 'absolute', top: 50, left: 10, background: 'rgba(255,255,255,0.8)', padding: 4 }}>
-        <div>{displaySize()}</div>
-        <select value={unit} onChange={e => setUnit(e.target.value as Unit)}>
-          <option value="mm">mm</option>
-          <option value="cm">cm</option>
-          <option value="m">m</option>
-          <option value="in">in</option>
-        </select>
-        <button onClick={() => viewerRef.current?.setView('top')}>Top</button>
-        <button onClick={() => viewerRef.current?.setView('front')}>Front</button>
-        <button onClick={() => viewerRef.current?.setView('right')}>Right</button>
-        <button onClick={() => viewerRef.current?.setView('iso')}>Iso</button>
-        <button onClick={() => viewerRef.current?.toggleProjection()}>Toggle Proj</button>
+    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '8px', background: '#0b1220', borderBottom: '1px solid #1f2937' }}>
+        <input type="file" accept=".stl,.STL" onChange={onFile} />
+        <button onClick={() => viewerRef.current?.setView('iso')} style={{ marginLeft: 8 }}>Iso</button>
+        <button onClick={() => viewerRef.current?.setView('top')} style={{ marginLeft: 4 }}>Top</button>
+        <button onClick={() => viewerRef.current?.setView('front')} style={{ marginLeft: 4 }}>Front</button>
+        <button onClick={() => viewerRef.current?.setView('right')} style={{ marginLeft: 4 }}>Right</button>
       </div>
+      <div id="viewport" ref={containerRef} />
     </div>
-  );
-};
-
-export default App;
+  )
+}
