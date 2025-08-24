@@ -1,49 +1,43 @@
-import * as THREE from 'three';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+// src/loaders/meshLoader.ts
+import * as THREE from 'three'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
+import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
-export interface WorkerMeshMessage {
-  id: number;
-  positions: Float32Array;
-  normals: Float32Array;
-  indices: Uint32Array;
-  error?: string;
+function mergeFromObject(root: THREE.Object3D) {
+  const geos: THREE.BufferGeometry[] = []
+  root.updateWorldMatrix(true, true)
+  root.traverse((child: any) => {
+    if (child.isMesh && child.geometry) {
+      const g = child.geometry.clone()
+      g.applyMatrix4(child.matrixWorld)
+      geos.push(g)
+    }
+  })
+  const merged = BufferGeometryUtils.mergeGeometries(geos, true)
+  if (!merged) throw new Error('No geometry found in file')
+  merged.computeVertexNormals()
+  return merged
 }
 
-export async function loadMesh(file: File, worker: Worker): Promise<THREE.Object3D> {
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  if (!ext) throw new Error('Unable to determine file extension');
+export async function loadMeshFile(file: File): Promise<THREE.BufferGeometry> {
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
 
-  if (ext === 'stl') {
-    const buf = await file.arrayBuffer();
-    const geom = new STLLoader().parse(buf);
-    return new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xcccccc }));
-  }
+// mesh formats handled on main thread
+if (ext === 'stl' || ext === 'obj' || ext === '3mf') {
+  const geom = await loadMeshFile(file)   // ← from loaders/meshLoader
+  setDimsFromGeometry(geom)
+  viewerRef.current!.loadMeshFromGeometry(geom)
+  return
+}
 
-  if (ext === 'obj') {
-    const text = await file.text();
-    const obj = new OBJLoader().parse(text);
-    return obj;
-  }
+// CAD formats handled in the worker
+if (ext === 'step' || ext === 'stp' || ext === 'iges' || ext === 'igs' || ext === 'brep') {
+  // ... your existing worker code stays the same
+  return
+}
 
-  // STEP/IGES handled by worker
-  const buffer = await file.arrayBuffer();
-  return new Promise((resolve, reject) => {
-    const id = Date.now();
-    const listener = (e: MessageEvent<WorkerMeshMessage>) => {
-      if (e.data.id !== id) return;
-      worker.removeEventListener('message', listener);
-      if (e.data.error) {
-        reject(new Error(e.data.error));
-      } else {
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.BufferAttribute(e.data.positions, 3));
-        geom.setAttribute('normal', new THREE.BufferAttribute(e.data.normals, 3));
-        geom.setIndex(new THREE.BufferAttribute(e.data.indices, 1));
-        resolve(new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xcccccc }))); 
-      }
-    };
-    worker.addEventListener('message', listener);
-    worker.postMessage({ id, type: 'tessellate', ext, buffer }, [buffer]);
-  });
+alert('Unsupported file. Try STL, OBJ, 3MF, STEP, IGES or BREP.')
+
 }
